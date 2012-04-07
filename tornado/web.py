@@ -152,6 +152,11 @@ class RequestHandler(object):
         """An alias for `self.application.settings`."""
         return self.application.settings
 
+    @property
+    def controllers(self):
+        """An alias for `self.application.controllers`."""
+        return self.application.controllers
+
     def head(self, *args, **kwargs):
         raise HTTPError(405)
 
@@ -1153,6 +1158,8 @@ class Application(object):
             (r"/article/([0-9]+)", ArticleHandler),
         ])
 
+    A list of `Controller` classes can be passed to the controllers argument.
+
     You can serve static files by sending the static_path setting as a
     keyword argument. We will serve those files from the /static/ URI
     (this is configurable with the static_url_prefix setting),
@@ -1167,7 +1174,7 @@ class Application(object):
        "application settings".
     """
     def __init__(self, handlers=None, default_host="", transforms=None,
-                 wsgi=False, **settings):
+                 wsgi=False, controllers=None, **settings):
         if transforms is None:
             self.transforms = []
             if settings.get("gzip"):
@@ -1184,6 +1191,7 @@ class Application(object):
                            'Template': TemplateModule,
                            }
         self.ui_methods = {}
+        self.controllers = {}
         self._wsgi = wsgi
         self._load_ui_modules(settings.get("ui_modules", {}))
         self._load_ui_methods(settings.get("ui_methods", {}))
@@ -1200,6 +1208,15 @@ class Application(object):
                             r"/(favicon\.ico)", r"/(robots\.txt)"]:
                 handlers.insert(0, (pattern, static_handler_class,
                                     static_handler_args))
+
+        if controllers:
+            handlers = list(handlers or [])
+            
+            for controller_class in controllers:
+                controller = controller_class(self)
+                self.controllers[controller_class] = controller
+                handlers.extend(controller.get_handlers())
+
         if handlers: self.add_handlers(".*$", handlers)
 
         # Automatically reload modified modules
@@ -1392,6 +1409,26 @@ class Application(object):
         log_method("%d %s %.2fms", handler.get_status(),
                    handler._request_summary(), request_time)
 
+
+class Controller(object):
+    """An instance-wide controller class
+    
+    Use this class to provide modularity of handlers. Pass a list of 
+    `Controller`s to the application's constructor.
+    """
+    
+    def __init__(self, application):
+        self.application = application
+        self.init()
+    
+    def get_handlers(self):
+        """To be overriden to provide handlers to the application"""
+        
+        raise NotImplementedError()
+    
+    def init(self):
+        '''Override this class for initalization routines'''
+        pass
 
 
 class HTTPError(Exception):

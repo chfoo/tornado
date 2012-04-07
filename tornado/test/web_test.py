@@ -1,16 +1,18 @@
-from tornado.escape import json_decode, utf8, to_unicode, recursive_unicode, native_str
+from tornado.escape import json_decode, utf8, to_unicode, recursive_unicode, \
+	native_str
 from tornado.iostream import IOStream
 from tornado.template import DictLoader
 from tornado.testing import LogTrapTestCase, AsyncHTTPTestCase
 from tornado.util import b, bytes_type, ObjectDict
-from tornado.web import RequestHandler, authenticated, Application, asynchronous, url, HTTPError, StaticFileHandler, _create_signature
-
+from tornado.web import RequestHandler, authenticated, Application, asynchronous, \
+	url, HTTPError, StaticFileHandler, _create_signature, URLSpec, Controller
 import binascii
 import logging
 import os
 import re
 import socket
 import sys
+
 
 class CookieTestRequestHandler(RequestHandler):
     # stub out enough methods to make the secure_cookie functions work
@@ -334,6 +336,17 @@ class RedirectHandler(RequestHandler):
         else:
             raise Exception("didn't get permanent or status arguments")
 
+class ControllerHandler(RequestHandler):
+    def get(self):
+        if not self.controllers.get(TestController):
+            raise Exception('Controllers not set')
+
+class TestController(Controller):
+    def get_handlers(self):
+        if not self.application:
+            raise Exception("Application not set")
+        return [url('/controller/', ControllerHandler)]
+
 
 class WebTest(AsyncHTTPTestCase, LogTrapTestCase):
     def get_app(self):
@@ -362,6 +375,7 @@ class WebTest(AsyncHTTPTestCase, LogTrapTestCase):
             ]
         return Application(urls,
                            template_loader=loader,
+                           controllers=[TestController],
                            autoescape="xhtml_escape")
 
     def fetch_json(self, *args, **kwargs):
@@ -451,6 +465,10 @@ js_embed()
         self.assertEqual(response.code, 302)
         response = self.fetch("/redirect?status=307", follow_redirects=False)
         self.assertEqual(response.code, 307)
+
+    def test_controller(self):
+        response = self.fetch("/controller/")
+        self.assertEqual(response.code, 200)
 
 
 class ErrorResponseTest(AsyncHTTPTestCase, LogTrapTestCase):
