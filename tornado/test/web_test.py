@@ -5,8 +5,10 @@ from tornado.template import DictLoader
 from tornado.testing import LogTrapTestCase, AsyncHTTPTestCase
 from tornado.util import b, bytes_type, ObjectDict
 from tornado.web import RequestHandler, authenticated, Application, asynchronous, \
-	url, HTTPError, StaticFileHandler, _create_signature, URLSpec, Controller
+	url, HTTPError, StaticFileHandler, _create_signature, URLSpec, Controller, \
+	FileUploadHandler
 import binascii
+import cStringIO
 import logging
 import os
 import re
@@ -336,6 +338,34 @@ class RedirectHandler(RequestHandler):
         else:
             raise Exception("didn't get permanent or status arguments")
 
+class FileUploadTestHandler(FileUploadHandler):
+    def post(self):
+        self.start_reading()
+    
+    def upload_finished(self):
+        if self.field_storage['file'].filename and self.field_storage['file'].file:
+            if self.field_storage['file'].filename != 'myfile.txt':
+                raise Exception("filename does not match")
+            
+            size = 0
+            f = self.field_storage['file'].file
+            
+            while True:
+                data = f.read()
+                
+                if data == '':
+                    break
+                
+                size += len(data)
+            
+            if size != 10000000:
+                raise Exception("Incorrect size")
+            
+            self.set_status(200)
+            self.finish()
+        else:
+            raise Exception("upload didn't work")
+
 class ControllerHandler(RequestHandler):
     def get(self):
         if not self.controllers.get(TestController):
@@ -372,6 +402,7 @@ class WebTest(AsyncHTTPTestCase, LogTrapTestCase):
             url("/flow_control", FlowControlHandler),
             url("/multi_header", MultiHeaderHandler),
             url("/redirect", RedirectHandler),
+            url("/file_upload", FileUploadTestHandler),
             ]
         return Application(urls,
                            template_loader=loader,
@@ -468,6 +499,31 @@ js_embed()
 
     def test_controller(self):
         response = self.fetch("/controller/")
+        self.assertEqual(response.code, 200)
+    
+    def test_file_upload(self):
+        boundary = b'TornadoBoundary'
+        file_data = b'x' * 10000000
+        buffer = []
+        
+        buffer.append(b'--' + boundary)
+        buffer.append(b'Content-Disposition: form-data; name="file"; filename="myfile.txt"')
+        buffer.append(b'Content-Type: text/plain')
+        buffer.append(b'')
+        buffer.append(file_data)
+        buffer.append(b'--' + boundary + b'--')
+        buffer.append(b'')
+        
+        body = b'\r\n'.join(buffer)
+        
+        response = self.fetch("/file_upload", method="POST",
+              headers={
+                 'Content-Type': 'multipart/form-data; boundary=%s' % boundary,
+                 'Content-Length': '%s' % len(body)
+            },
+            body=body
+        )
+        
         self.assertEqual(response.code, 200)
 
 

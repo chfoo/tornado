@@ -55,6 +55,7 @@ import Cookie
 import base64
 import binascii
 import calendar
+import cgi
 import datetime
 import email.utils
 import functools
@@ -69,6 +70,7 @@ import os.path
 import re
 import stat
 import sys
+import tempfile
 import threading
 import time
 import tornado
@@ -1727,6 +1729,87 @@ class FallbackHandler(RequestHandler):
         self.fallback(self.request)
         self._finished = True
 
+@stream_body
+class FileUploadHandler(RequestHandler):
+    """Supports large streaming file uploads using `cgi.FieldStorage`
+    
+    This handler is asynchronous, so be sure to call `finish()` when you
+    are done.
+    """
+    
+    CHUNK_SIZE = 4960
+    BUFFER_SIZE = 4960 * 4
+    
+    @property
+    def field_storage(self):
+        '''Return the `cgi.FieldStorage` object'''
+        
+        return self._field_storage
+    
+    @property
+    def bytes_read(self):
+        '''Return the number of bytes recieved from the client
+        
+        You can use this value to provide upload progress to the client.
+        '''
+        
+        return self._bytes_read
+    
+    @property
+    def bytes_expected(self):
+        '''Return the number of bytes expected from the client
+        
+        You should use this value to reject uploads that may be too large
+        for example.
+        '''
+        
+        return self.request.content_length
+    
+    @asynchronous
+    def start_reading(self):
+        """Begin receiving the file uploads"""
+        
+        self._bytes_read = 0
+        self.request.request_continue()
+        self._read_data()
+        
+    def upload_finished(self):
+        '''Called when the upload is finished
+        
+        When this method is called, the FieldStorage should be ready for 
+        access.
+        
+        Override this method to finish processing. 
+        '''
+        
+        raise NotImplementedError()
+    
+    def _read_data(self):
+        self._fp = tempfile.SpooledTemporaryFile(FileUploadHandler.BUFFER_SIZE)
+        self._read_iteration()
+    
+    def _read_iteration(self):
+        size = min(FileUploadHandler.CHUNK_SIZE,
+            self.request.content_length - self._bytes_read)
+        self.request.connection.stream.read_bytes(size, self._chunk_loaded)
+    
+    def _chunk_loaded(self, data):
+        self._bytes_read += len(data)
+        
+        if len(data) == 0:
+            self._fp.seek(0)
+            self._create_field_storage()
+        else:
+            self._fp.write(data)
+            self._read_iteration()
+    
+    def _create_field_storage(self):
+        self._field_storage = cgi.FieldStorage(fp=self._fp,
+                environ={'REQUEST_METHOD': self.request.method,
+                    'QUERY_STRING': self.request.query,
+                    },
+                headers=self.request.headers)
+        self.upload_finished()
 
 class OutputTransform(object):
     """A transform modifies the result of an HTTP request (e.g., GZip encoding)
