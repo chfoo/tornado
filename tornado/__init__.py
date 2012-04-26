@@ -16,8 +16,6 @@
 
 """The Tornado web server and tools."""
 
-from __future__ import absolute_import, division, with_statement
-
 # version is a human-readable version number.
 
 # version_info is a four-tuple for programmatic comparison. The first
@@ -25,5 +23,5 @@ from __future__ import absolute_import, division, with_statement
 # is zero for an official release, positive for a development branch,
 # or negative for a release candidate (after the base version number
 # has been incremented)
-version = "2.2.post1"
-version_info = (2, 2, 0, 1)
+version = "2.2.1"
+version_info = (2, 2, 1, 0)
