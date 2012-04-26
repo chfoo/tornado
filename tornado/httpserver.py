@@ -24,6 +24,8 @@ This module also defines the `HTTPRequest` class which is exposed via
 `tornado.web.RequestHandler.request`.
 """
 
+from __future__ import absolute_import, division, with_statement
+
 import Cookie
 import logging
 import socket
@@ -41,6 +43,7 @@ try:
     import ssl # Python 2.6+
 except ImportError:
     ssl = None
+
 
 class HTTPServer(TCPServer):
     r"""A non-blocking, single-threaded HTTP server.
@@ -103,7 +106,7 @@ class HTTPServer(TCPServer):
        In many cases, `tornado.web.Application.listen` can be used to avoid
        the need to explicitly create the `HTTPServer`.
 
-    2. `~tornado.netutil.TCPServer.bind`/`~tornado.netutil.TCPServer.start`: 
+    2. `~tornado.netutil.TCPServer.bind`/`~tornado.netutil.TCPServer.start`:
        simple multi-process::
 
             server = HTTPServer(app)
@@ -143,9 +146,11 @@ class HTTPServer(TCPServer):
         HTTPConnection(stream, address, self.request_callback,
                        self.no_keep_alive, self.xheaders)
 
+
 class _BadRequestException(Exception):
     """Exception class for malformed HTTP requests."""
     pass
+
 
 class HTTPConnection(object):
     """Handles a connection to an HTTP client, executing HTTP requests.
@@ -189,7 +194,7 @@ class HTTPConnection(object):
         if self._write_callback is not None:
             callback = self._write_callback
             self._write_callback = None
-            callback()            
+            callback()
         # _on_write_complete is enqueued on the IOLoop whenever the
         # IOStream's write buffer becomes empty, but it's possible for
         # another callback that runs on the IOLoop before it to
@@ -242,7 +247,10 @@ class HTTPConnection(object):
                 content_length = int(content_length)
                 if content_length > self.stream.max_buffer_size:
                     raise _BadRequestException("Content-Length too long")
-                self._request.content_length = content_length
+                if headers.get("Expect") == "100-continue":
+                    self.stream.write(b("HTTP/1.1 100 (Continue)\r\n\r\n"))
+                self.stream.read_bytes(content_length, self._on_request_body)
+                return
 
             self.request_callback(self._request)
         except _BadRequestException, e:
@@ -250,6 +258,31 @@ class HTTPConnection(object):
                          self.address[0], e)
             self.stream.close()
             return
+
+    def _on_request_body(self, data):
+        self._request.body = data
+        content_type = self._request.headers.get("Content-Type", "")
+        if self._request.method in ("POST", "PUT"):
+            if content_type.startswith("application/x-www-form-urlencoded"):
+                arguments = parse_qs_bytes(native_str(self._request.body))
+                for name, values in arguments.iteritems():
+                    values = [v for v in values if v]
+                    if values:
+                        self._request.arguments.setdefault(name, []).extend(
+                            values)
+            elif content_type.startswith("multipart/form-data"):
+                fields = content_type.split(";")
+                for field in fields:
+                    k, sep, v = field.strip().partition("=")
+                    if k == "boundary" and v:
+                        httputil.parse_multipart_form_data(
+                            utf8(v), data,
+                            self._request.arguments,
+                            self._request.files)
+                        break
+                else:
+                    logging.warning("Invalid multipart/form-data")
+        self.request_callback(self._request)
 
 
 class HTTPRequest(object):
@@ -308,8 +341,8 @@ class HTTPRequest(object):
        GET/POST arguments are available in the arguments property, which
        maps arguments names to lists of values (to support multiple values
        for individual names). Names are of type `str`, while arguments
-       are byte strings.  Note that this is different from 
-       `RequestHandler.get_argument`, which returns argument values as 
+       are byte strings.  Note that this is different from
+       `RequestHandler.get_argument`, which returns argument values as
        unicode strings.
 
     .. attribute:: files
@@ -347,7 +380,7 @@ class HTTPRequest(object):
             self.remote_ip = remote_ip
             if protocol:
                 self.protocol = protocol
-            elif connection and isinstance(connection.stream, 
+            elif connection and isinstance(connection.stream,
                                            iostream.SSLIOStream):
                 self.protocol = "https"
             else:
@@ -365,8 +398,9 @@ class HTTPRequest(object):
         self.arguments = {}
         for name, values in arguments.iteritems():
             values = [v for v in values if v]
-            if values: self.arguments[name] = values
-    
+            if values:
+                self.arguments[name] = values
+
     def request_continue(self):
         '''Send a 100-Continue, telling the client to send the request body'''
         if self.headers.get("Expect") == "100-continue":
