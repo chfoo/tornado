@@ -247,10 +247,7 @@ class HTTPConnection(object):
                 content_length = int(content_length)
                 if content_length > self.stream.max_buffer_size:
                     raise _BadRequestException("Content-Length too long")
-                if headers.get("Expect") == "100-continue":
-                    self.stream.write(b("HTTP/1.1 100 (Continue)\r\n\r\n"))
-                self.stream.read_bytes(content_length, self._on_request_body)
-                return
+                self._request.content_length = content_length
 
             self.request_callback(self._request)
         except _BadRequestException, e:
