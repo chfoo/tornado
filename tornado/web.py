@@ -1827,6 +1827,148 @@ class FileUploadHandler(RequestHandler):
                 headers=self.request.headers)
         self.upload_finished()
 
+
+class StreamingFileMixIn(object):
+    """Supports streaming files to the client
+    
+    This mix-in allows handlers to stream file or file-like objects
+    with support for file download names and partial requests
+    """
+
+    @asynchronous
+    def serve_file(self, file_, download_filename=None, mimetype=None, 
+    size=None, last_modified=None):
+        """Stream a file to the client"""
+        
+        if not hasattr(file_, "read"):
+            file_obj = open(file_, "rb")
+            
+            if size is None:
+                size = os.path.getsize(file_)
+            
+            if last_modified is None:
+                last_modified = os.path.getmtime(file_)
+            
+            if mimetype is None:
+                type, encoding = mimetypes.guess_type(file_, strict=False)
+                
+                if type:
+                    mimetype = type
+                    
+                    if encoding:
+                        mimetype += '; encoding=' + encoding
+            
+        else:
+            file_obj = file_
+        
+        if last_modified:
+            self.set_header("Last-Modified", 
+                datetime.datetime.fromtimestamp(last_modified))
+        
+        if mimetype:
+            self.set_header("Content-Type", mimetype)
+        
+        if download_filename:
+            download_filename = bytes(download_filename)
+            
+            # rfc5987 compliant
+            self.set_header("Content-Disposition", 
+                b"attachment; filename*=UTF-8''%s" % urllib.quote(
+                    download_filename.encode('utf8')))
+        
+        if size:
+            self.set_header("Content-Length", size)
+            self.set_header("Accept-Ranges", "bytes")
+        
+        self.set_header("Cache-Control", "private")
+        
+        # Check the If-Modified-Since, and don't send the result if the
+        # content has not been modified
+        ims_value = self.request.headers.get("If-Modified-Since")
+        if ims_value is not None:
+            date_tuple = email.utils.parsedate(ims_value)
+            if_since = datetime.datetime.fromtimestamp(time.mktime(date_tuple))
+            if if_since >= last_modified:
+                self.set_status(304)
+                self.finish()
+                return
+        
+        if self.request.method == "GET":
+            if size and "Range" in self.request.headers and hasattr(file_obj, "seek"):
+                range_str = self.request.headers.get("Range")
+                
+                try:
+                    start_bytes, end_bytes = self._parse_range_str(range_str)
+                except ValueError:
+                    self.set_status(400)
+                    self.finish()
+                    return
+                
+                if end_bytes is None:
+                    end_bytes = size - 1
+                
+                end_bytes = min(end_bytes, size - 1)
+                
+                if start_bytes > end_bytes:
+                    self.set_status(416)
+                    self.finish()
+                    return
+                
+                self._bytes_to_read = end_bytes - start_bytes + 1
+                file_obj.seek(start_bytes)
+                
+                self.set_status(206)
+                self.set_header("Content-Range", "bytes %d-%d/%d" % (
+                    start_bytes, end_bytes, self._bytes_to_read))
+                self.set_header("Content-Length", self._bytes_to_read)
+            else:
+                self._bytes_to_read = None
+            
+            def send():
+                if self._bytes_to_read is None:
+                    num_bytes = 4096
+                else:
+                    num_bytes = self._bytes_to_read
+                
+                data = file_obj.read(min(num_bytes, 4096))
+                
+                if len(data) > 0:
+                    if self._bytes_to_read is not None:
+                        self._bytes_to_read -= len(data)
+                    
+                    self.write(data)
+                    self.flush(callback=send)
+                    
+                else:
+                    self.finish()
+            
+            send()
+        else:
+            self.finish()
+    
+    def _parse_range_str(self, range_str):
+        range_str = range_str.strip()
+        
+        if not range_str.startswith("bytes"):
+            raise ValueError("Range is not 'bytes'")
+        
+        range_str = range_str.split("=")[1]
+        
+        start_str, seperator, end_str = range_str.partition("-") #@UnusedVariable
+        
+        if start_str:
+            start_bytes = int(start_str)
+        else:
+            start_bytes = 0
+        
+        if end_str:
+            end_bytes = int(end_str)
+        else:
+            end_bytes = None
+        
+        return (start_bytes, end_bytes)
+
+
 class OutputTransform(object):
     """A transform modifies the result of an HTTP request (e.g., GZip encoding)
 

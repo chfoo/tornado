@@ -1,12 +1,13 @@
 from __future__ import absolute_import, division, with_statement
-from tornado.escape import json_decode, utf8, to_unicode, recursive_unicode, native_str
+from tornado.escape import json_decode, utf8, to_unicode, recursive_unicode, \
+    native_str
 from tornado.iostream import IOStream
 from tornado.template import DictLoader
 from tornado.testing import LogTrapTestCase, AsyncHTTPTestCase
 from tornado.util import b, bytes_type, ObjectDict
 from tornado.web import RequestHandler, authenticated, Application, asynchronous, \
-	url, HTTPError, StaticFileHandler, _create_signature, URLSpec, Controller, \
-	FileUploadHandler
+    url, HTTPError, StaticFileHandler, _create_signature, URLSpec, Controller, \
+    FileUploadHandler, StreamingFileMixIn
 import binascii
 import cStringIO
 import logging
@@ -368,6 +369,7 @@ class RedirectHandler(RequestHandler):
         else:
             raise Exception("didn't get permanent or status arguments")
 
+
 class FileUploadTestHandler(FileUploadHandler):
     def post(self):
         self.start_reading()
@@ -396,6 +398,21 @@ class FileUploadTestHandler(FileUploadHandler):
         else:
             raise Exception("upload didn't work")
 
+
+class StreamingHandler(RequestHandler, StreamingFileMixIn):
+    def get(self):
+        data = "xyz" * 1000
+        f = cStringIO.StringIO(data)
+        
+        if self.get_argument("size", False):
+            size = len(data)
+        else:
+            size = None
+        
+        self.serve_file(f, download_filename="myfile.txt",
+            mimetype="text/plain", size=size)
+
+
 class HeaderInjectionHandler(RequestHandler):
     def get(self):
         try:
@@ -410,6 +427,7 @@ class ControllerHandler(RequestHandler):
     def get(self):
         if not self.controllers.get(TestController):
             raise Exception('Controllers not set')
+
 
 class TestController(Controller):
     def get_handlers(self):
@@ -444,6 +462,7 @@ class WebTest(AsyncHTTPTestCase, LogTrapTestCase):
             url("/redirect", RedirectHandler),
             url("/header_injection", HeaderInjectionHandler),
             url("/file_upload", FileUploadTestHandler),
+            url("/stream_download", StreamingHandler)
             ]
         return Application(urls,
                            template_loader=loader,
@@ -570,7 +589,34 @@ js_embed()
         )
         
         self.assertEqual(response.code, 200)
-
+    
+    def test_stream_download(self):
+        response = self.fetch("/stream_download")
+        self.assertEqual(response.code, 200)
+        self.assertEqual(response.headers['Content-Type'], "text/plain")
+        self.assertEqual(response.body, "xyz" * 1000)
+        
+        response = self.fetch("/stream_download?size=true")
+        self.assertEqual(response.code, 200)
+        self.assertEqual(response.headers['Content-Type'], "text/plain")
+        self.assertEqual(response.body, "xyz" * 1000)
+    
+    def test_stream_download_range(self):
+        response = self.fetch("/stream_download?size=true", headers={
+            "Range": "bytes=3-"
+        })
+        self.assertEqual(response.code, 206)
+        self.assertEqual(response.headers['Content-Type'], "text/plain")
+        self.assertEqual(response.headers['Content-Range'], "bytes 3-2999/2997")
+        self.assertEqual(response.body, "xyz" * 999)
+        
+        response = self.fetch("/stream_download?size=true", headers={
+            "Range": "bytes=0-2"
+        })
+        self.assertEqual(response.code, 206)
+        self.assertEqual(response.headers['Content-Type'], "text/plain")
+        self.assertEqual(response.headers['Content-Range'], "bytes 0-2/3")
+        self.assertEqual(response.body, "xyz")
 
 class ErrorResponseTest(AsyncHTTPTestCase, LogTrapTestCase):
     def get_app(self):
