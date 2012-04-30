@@ -1847,7 +1847,8 @@ class StreamingFileMixIn(object):
                 size = os.path.getsize(file_)
             
             if last_modified is None:
-                last_modified = os.path.getmtime(file_)
+                last_modified = datetime.datetime.fromtimestamp(
+                    os.path.getmtime(file_))
             
             if mimetype is None:
                 type, encoding = mimetypes.guess_type(file_, strict=False)
@@ -1862,8 +1863,7 @@ class StreamingFileMixIn(object):
             file_obj = file_
         
         if last_modified:
-            self.set_header("Last-Modified", 
-                datetime.datetime.fromtimestamp(last_modified))
+            self.set_header("Last-Modified", last_modified)
         
         if mimetype:
             self.set_header("Content-Type", mimetype)
