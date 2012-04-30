@@ -1864,6 +1864,20 @@ class StreamingFileMixIn(object):
         
         if last_modified:
             self.set_header("Last-Modified", last_modified)
+            
+            # Check the If-Modified-Since, and don't send the result if the
+            # content has not been modified
+            ims_value = self.request.headers.get("If-Modified-Since")
+            if ims_value is not None:
+                date_tuple = email.utils.parsedate(ims_value)
+                if_since = datetime.datetime.fromtimestamp(time.mktime(date_tuple))
+                
+                # dates can only be expressed with second precision while
+                # datetime objects may have milliseconds
+                if if_since.replace(microsecond=0) >= last_modified.replace(microsecond=0):
+                    self.set_status(304)
+                    self.finish()
+                    return
         
         if mimetype:
             self.set_header("Content-Type", mimetype)
@@ -1881,17 +1895,6 @@ class StreamingFileMixIn(object):
             self.set_header("Accept-Ranges", "bytes")
         
         self.set_header("Cache-Control", "private")
-        
-        # Check the If-Modified-Since, and don't send the result if the
-        # content has not been modified
-        ims_value = self.request.headers.get("If-Modified-Since")
-        if ims_value is not None:
-            date_tuple = email.utils.parsedate(ims_value)
-            if_since = datetime.datetime.fromtimestamp(time.mktime(date_tuple))
-            if if_since >= last_modified:
-                self.set_status(304)
-                self.finish()
-                return
         
         if self.request.method == "GET":
             if size and "Range" in self.request.headers and hasattr(file_obj, "seek"):
