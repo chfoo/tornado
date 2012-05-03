@@ -1903,9 +1903,7 @@ class StreamingFileMixIn(object):
                 try:
                     start_bytes, end_bytes = self._parse_range_str(range_str)
                 except ValueError:
-                    self.set_status(400)
-                    self.finish()
-                    return
+                    raise HTTPError(400)
                 
                 if end_bytes is None:
                     end_bytes = size - 1
@@ -1913,9 +1911,7 @@ class StreamingFileMixIn(object):
                 end_bytes = min(end_bytes, size - 1)
                 
                 if start_bytes > end_bytes:
-                    self.set_status(416)
-                    self.finish()
-                    return
+                    raise HTTPError(416)
                 
                 self._bytes_to_read = end_bytes - start_bytes + 1
                 file_obj.seek(start_bytes)
