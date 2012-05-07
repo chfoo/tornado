@@ -1753,8 +1753,8 @@ class FileUploadHandler(RequestHandler):
     are done.
     """
     
-    CHUNK_SIZE = 4960
-    BUFFER_SIZE = 4960 * 4
+    CHUNK_SIZE = 102400 # 100 KB
+    BUFFER_SIZE = CHUNK_SIZE + 1
     
     @property
     def field_storage(self):
@@ -1784,6 +1784,12 @@ class FileUploadHandler(RequestHandler):
     @asynchronous
     def start_reading(self):
         """Begin receiving the file uploads"""
+        
+        max_length = self.settings.get("max_streaming_upload_size", 
+            self.request.connection.stream.max_buffer_size)
+        
+        if self.request.content_length > max_length:
+            raise HTTPError(400, "Content-Length too long")
         
         self._bytes_read = 0
         self.request.request_continue()

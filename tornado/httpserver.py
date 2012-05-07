@@ -245,8 +245,8 @@ class HTTPConnection(object):
             content_length = headers.get("Content-Length")
             if content_length:
                 content_length = int(content_length)
-                if content_length > self.stream.max_buffer_size:
-                    raise _BadRequestException("Content-Length too long")
+                # Can't check if request exceeds max_buffer_size now due to 
+                # streaming body upload hack
                 self._request.content_length = content_length
 
             self.request_callback(self._request)
@@ -404,6 +404,9 @@ class HTTPRequest(object):
             self.connection.stream.write(b("HTTP/1.1 100 (Continue)\r\n\r\n"))
 
     def _read_body(self, exec_req_cb):
+        if self.content_length > self.connection.stream.max_buffer_size:
+            raise _BadRequestException("Content-Length too long")
+        
         self.request_continue()
         self.connection.stream.read_bytes(self.content_length,
             lambda data: self._on_request_body(data, exec_req_cb))
