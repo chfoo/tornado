@@ -645,7 +645,7 @@ class ErrorResponseTest(AsyncHTTPTestCase, LogTrapTestCase):
                 if self.get_argument("status", None):
                     self.send_error(int(self.get_argument("status")))
                 else:
-                    1/0
+                    1 / 0
 
             def get_error_html(self, status_code, **kwargs):
                 self.set_header("Content-Type", "text/plain")
@@ -656,7 +656,7 @@ class ErrorResponseTest(AsyncHTTPTestCase, LogTrapTestCase):
 
         class FailedWriteErrorHandler(RequestHandler):
             def get(self):
-                1/0
+                1 / 0
 
             def write_error(self, status_code, **kwargs):
                 raise Exception("exception in write_error")

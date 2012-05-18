@@ -514,4 +514,3 @@ class HTTPRequest(object):
                 return False
             raise
         return True
-

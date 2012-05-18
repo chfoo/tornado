@@ -287,7 +287,6 @@ class RequestHandler(object):
             raise ValueError("Unsafe header value %r", value)
         return value
 
-
     _ARG_DEFAULT = []
 
     def get_argument(self, name, default=_ARG_DEFAULT, strip=True):
@@ -1190,8 +1189,9 @@ def addslash(method):
         if not self.request.path.endswith("/"):
             if self.request.method in ("GET", "HEAD"):
                 uri = self.request.path + "/"
-                if self.request.query: uri += "?" + self.request.query
-                self.redirect(uri)
+                if self.request.query:
+                    uri += "?" + self.request.query
+                self.redirect(uri, permanent = True)
                 return
             raise HTTPError(404)
         return method(self, *args, **kwargs)
@@ -1440,7 +1440,7 @@ class Application(object):
 
                         if spec.regex.groupindex:
                             kwargs = dict(
-                                (k, unquote(v))
+                                (str(k), unquote(v))
                                 for (k, v) in match.groupdict().iteritems())
                         else:
                             args = [unquote(s) for s in match.groups()]
@@ -2154,7 +2154,7 @@ class TemplateModule(UIModule):
     inside the template and give it keyword arguments corresponding to
     the methods on UIModule: {{ set_resources(js_files=static_url("my.js")) }}
     Note that these resources are output once per template file, not once
-    per instantiation of the template, so they must not depend on 
+    per instantiation of the template, so they must not depend on
     any arguments to the template.
     """
     def __init__(self, handler):
