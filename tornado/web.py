@@ -55,7 +55,6 @@ import Cookie
 import base64
 import binascii
 import calendar
-import cgi
 import datetime
 import email.utils
 import functools
@@ -70,7 +69,6 @@ import os.path
 import re
 import stat
 import sys
-import tempfile
 import threading
 import time
 import tornado
@@ -1682,99 +1680,6 @@ class FallbackHandler(RequestHandler):
     def prepare(self):
         self.fallback(self.request)
         self._finished = True
-
-
-class FileUploadHandlerMixin(object):
-    """Supports large streaming file uploads using `cgi.FieldStorage`
-    
-    This handler mixin is asynchronous, so be sure to call `finish()` when you
-    are done.
-    
-    Use the application setting ``max_streaming_upload_size`` for a global 
-    upload size. The default is 200 MB.
-    """
-    
-    BUFFER_SIZE = 1048576 # 1 MB
-    DEFAULT_MAX_SIZE = 209715200 # 200 MB
-    
-    @property
-    def field_storage(self):
-        '''Return the `cgi.FieldStorage` object'''
-        
-        return self._field_storage
-    
-    @property
-    def bytes_read(self):
-        '''Return the number of bytes recieved from the client
-        
-        You can use this value to provide upload progress to the client.
-        '''
-        
-        return self._bytes_read
-    
-    @property
-    def bytes_expected(self):
-        '''Return the number of bytes expected from the client
-        
-        You could use this value to dynamically reject uploads that may be too 
-        large for example. See also the class documentation about the global
-        application setting.
-        '''
-        
-        return int(self.request.headers['Content-Length'])
-    
-    @asynchronous
-    def start_reading(self):
-        """Begin receiving the file uploads"""
-        
-        if not self.request.large_body_expected:
-            self._fp = BytesIO(self.request.body)
-            self._create_field_storage()
-            return
-        
-        max_length = self.settings.get("max_streaming_upload_size", 
-            FileUploadHandlerMixin.DEFAULT_MAX_SIZE)
-        
-        if self.bytes_expected > max_length:
-            raise HTTPError(400, "Content-Length too long")
-        
-        self._bytes_read = 0
-        
-        if self.request.headers.get("Expect") == "100-continue":
-            self.request.connection.stream.write(b("HTTP/1.1 100 (Continue)\r\n\r\n"))
-        
-        self._read_data()
-        
-    def upload_finished(self):
-        '''Called when the upload is finished
-        
-        When this method is called, the FieldStorage should be ready for 
-        access.
-        
-        Override this method to finish processing. 
-        '''
-        
-        raise NotImplementedError()
-    
-    def _read_data(self):
-        self._fp = tempfile.SpooledTemporaryFile(FileUploadHandlerMixin.BUFFER_SIZE)
-        
-        self.request.connection.stream.read_bytes(self.bytes_expected, 
-            self._create_field_storage, self._chunk_loaded)
-        
-    def _chunk_loaded(self, data):
-        self._bytes_read += len(data)
-        
-        self._fp.write(data)
-    
-    def _create_field_storage(self, dummy=None):
-        self._fp.seek(0)
-        self._field_storage = cgi.FieldStorage(fp=self._fp,
-                environ={'REQUEST_METHOD': self.request.method,
-                    'QUERY_STRING': self.request.query,
-                    },
-                headers=self.request.headers)
-        self.upload_finished()
 
 
 class StreamingFileMixIn(object):

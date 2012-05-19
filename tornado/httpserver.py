@@ -246,11 +246,7 @@ class HTTPConnection(object):
             if content_length:
                 content_length = int(content_length)
                 if content_length > self.stream.max_buffer_size:
-                    # raise _BadRequestException("Content-Length too long")
-                    self._request.large_body_expected = True
-                    self.request_callback(self._request)
-                    return
-                    
+                    raise _BadRequestException("Content-Length too long")
                 if headers.get("Expect") == "100-continue":
                     self.stream.write(b("HTTP/1.1 100 (Continue)\r\n\r\n"))
                 self.stream.read_bytes(content_length, self._on_request_body)
@@ -360,13 +356,6 @@ class HTTPRequest(object):
        be accessed through the "connection" attribute. Since connections
        are typically kept open in HTTP/1.1, multiple requests can be handled
        sequentially on a single connection.
-    
-    .. attribute:: large_body_expected
-    
-       A `bool` that is `True` if the content body cannot be handled in memory.
-       The files attribute will not be automatically populated. To retrieve
-       the contents, a handler should validate the content-length, send a
-       100 Continue code to the browser and then read the data.
     """
     def __init__(self, method, uri, version="HTTP/1.0", headers=None,
                  body=None, remote_ip=None, protocol=None, host=None,
@@ -401,7 +390,6 @@ class HTTPRequest(object):
         self.connection = connection
         self._start_time = time.time()
         self._finish_time = None
-        self.large_body_expected = False
 
         scheme, netloc, path, query, fragment = urlparse.urlsplit(native_str(uri))
         self.path = path
