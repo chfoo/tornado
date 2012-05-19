@@ -7,7 +7,7 @@ from tornado.testing import LogTrapTestCase, AsyncHTTPTestCase
 from tornado.util import b, bytes_type, ObjectDict
 from tornado.web import RequestHandler, authenticated, Application, asynchronous, \
     url, HTTPError, StaticFileHandler, _create_signature, URLSpec, Controller, \
-    FileUploadHandler, StreamingFileMixIn
+    FileUploadHandlerMixin, StreamingFileMixIn
 import binascii
 import cStringIO
 import logging
@@ -370,7 +370,7 @@ class RedirectHandler(RequestHandler):
             raise Exception("didn't get permanent or status arguments")
 
 
-class FileUploadTestHandler(FileUploadHandler):
+class FileUploadTestHandler(RequestHandler, FileUploadHandlerMixin):
     def post(self):
         self.start_reading()
     
@@ -390,7 +390,7 @@ class FileUploadTestHandler(FileUploadHandler):
                 
                 size += len(data)
             
-            if size != 10000000:
+            if size != 105906176:
                 raise Exception("Incorrect size")
             
             self.set_status(200)
@@ -567,7 +567,7 @@ js_embed()
     
     def test_file_upload(self):
         boundary = b'TornadoBoundary'
-        file_data = b'x' * 10000000
+        file_data = b'x' * 105906176
         buffer = []
         
         buffer.append(b'--' + boundary)

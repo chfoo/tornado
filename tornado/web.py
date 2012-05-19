@@ -992,18 +992,6 @@ class RequestHandler(object):
         try:
             if self.request.method not in self.SUPPORTED_METHODS:
                 raise HTTPError(405)
-            # read and parse the request body, if not disabled
-            exec_req_cb = lambda: self._execute_request(*args, **kwargs)
-            if (getattr(self, '_read_body', True) and
-                hasattr(self.request, 'content_length')):
-                self.request._read_body(exec_req_cb)
-            else:
-                exec_req_cb()
-        except Exception, e:
-            self._handle_request_exception(e)
-
-    def _execute_request(self, *args, **kwargs):
-        try:
             # If XSRF cookies are turned on, reject form submissions without
             # the proper cookie
             if self.request.method not in ("GET", "HEAD", "OPTIONS") and \
@@ -1072,56 +1060,6 @@ class RequestHandler(object):
 
     def _ui_method(self, method):
         return lambda *args, **kwargs: method(self, *args, **kwargs)
-
-
-def stream_body(cls):
-    """Wrap RequestHandler classes with this to prevent the
-    request body of PUT and POST request from being read and parsed
-    automatically.
-
-    If this decorator is given, the request body is not read and parsed
-    when a PUT or POST handler method is executed. It is up to the request
-    handler to read the body from the stream in the HTTP connection.
-
-    Using this decorator automatically implies the asynchronous decorator.
-
-    Without this decorator, the request body is automatically read and
-    parsed before a PUT or POST method is executed. ::
-
-       @web.stream_body
-       class StreamHandler(web.RequestHandler):
-
-           def put(self):
-               self.read_bytes = 0
-               self.request.request_continue()
-               self.read_chunks()
-
-           def read_chunks(self, chunk=''):
-               self.read_bytes += len(chunk)
-               chunk_length = min(10000,
-                   self.request.content_length - self.read_bytes)
-               if chunk_length > 0:
-                 self.request.connection.stream.read_bytes(
-                     chunk_length, self.read_chunks)
-               else:
-                   self.uploaded()
-
-           def uploaded(self):
-               self.write('Uploaded %d bytes' % self.read_bytes)
-               self.finish()
-
-    """
-    class StreamBody(cls):
-        def __init__(self, *args, **kwargs):
-            if args[0]._wsgi:
-                raise Exception("@stream_body is not supported for WSGI apps")
-            self._read_body = False
-            if hasattr(cls, 'post'):
-                cls.post = asynchronous(cls.post)
-            if hasattr(cls, 'put'):
-                cls.put = asynchronous(cls.put)
-            cls.__init__(self, *args, **kwargs)
-    return StreamBody
 
 
 def asynchronous(method):
@@ -1745,16 +1683,19 @@ class FallbackHandler(RequestHandler):
         self.fallback(self.request)
         self._finished = True
 
-@stream_body
-class FileUploadHandler(RequestHandler):
+
+class FileUploadHandlerMixin(object):
     """Supports large streaming file uploads using `cgi.FieldStorage`
     
-    This handler is asynchronous, so be sure to call `finish()` when you
+    This handler mixin is asynchronous, so be sure to call `finish()` when you
     are done.
+    
+    Use the application setting ``max_streaming_upload_size`` for a global 
+    upload size. The default is 10 GB.
     """
     
-    CHUNK_SIZE = 102400 # 100 KB
-    BUFFER_SIZE = CHUNK_SIZE + 1
+    BUFFER_SIZE = 1048576 # 1 MB
+    DEFAULT_MAX_SIZE = 10737418240 # 10 GB
     
     @property
     def field_storage(self):
@@ -1775,24 +1716,34 @@ class FileUploadHandler(RequestHandler):
     def bytes_expected(self):
         '''Return the number of bytes expected from the client
         
-        You should use this value to reject uploads that may be too large
-        for example.
+        You could use this value to dynamically reject uploads that may be too 
+        large for example. See also the class documentation about the global
+        application setting.
         '''
         
-        return self.request.content_length
+        return int(self.request.headers['Content-Length'])
     
     @asynchronous
     def start_reading(self):
-        """Begin receiving the file uploads"""
+        """Begin receiving the file uploads
+        
+        Raises `IOError` if no large file is expected.
+        """
+        
+        if not self.request.large_body_expected:
+            raise IOError('No large file expected')
         
         max_length = self.settings.get("max_streaming_upload_size", 
-            self.request.connection.stream.max_buffer_size)
+            FileUploadHandlerMixin.DEFAULT_MAX_SIZE)
         
-        if self.request.content_length > max_length:
+        if self.bytes_expected > max_length:
             raise HTTPError(400, "Content-Length too long")
         
         self._bytes_read = 0
-        self.request.request_continue()
+        
+        if self.request.headers.get("Expect") == "100-continue":
+            self.request.connection.stream.write(b("HTTP/1.1 100 (Continue)\r\n\r\n"))
+        
         self._read_data()
         
     def upload_finished(self):
@@ -1807,25 +1758,18 @@ class FileUploadHandler(RequestHandler):
         raise NotImplementedError()
     
     def _read_data(self):
-        self._fp = tempfile.SpooledTemporaryFile(FileUploadHandler.BUFFER_SIZE)
-        self._read_iteration()
-    
-    def _read_iteration(self):
-        size = min(FileUploadHandler.CHUNK_SIZE,
-            self.request.content_length - self._bytes_read)
-        self.request.connection.stream.read_bytes(size, self._chunk_loaded)
-    
+        self._fp = tempfile.SpooledTemporaryFile(FileUploadHandlerMixin.BUFFER_SIZE)
+        
+        self.request.connection.stream.read_bytes(self.bytes_expected, 
+            self._create_field_storage, self._chunk_loaded)
+        
     def _chunk_loaded(self, data):
         self._bytes_read += len(data)
         
-        if len(data) == 0:
-            self._fp.seek(0)
-            self._create_field_storage()
-        else:
-            self._fp.write(data)
-            self._read_iteration()
+        self._fp.write(data)
     
-    def _create_field_storage(self):
+    def _create_field_storage(self, dummy=None):
+        self._fp.seek(0)
         self._field_storage = cgi.FieldStorage(fp=self._fp,
                 environ={'REQUEST_METHOD': self.request.method,
                     'QUERY_STRING': self.request.query,

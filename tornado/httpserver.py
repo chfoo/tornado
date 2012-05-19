@@ -245,9 +245,16 @@ class HTTPConnection(object):
             content_length = headers.get("Content-Length")
             if content_length:
                 content_length = int(content_length)
-                # Can't check if request exceeds max_buffer_size now due to 
-                # streaming body upload hack
-                self._request.content_length = content_length
+                if content_length > self.stream.max_buffer_size:
+                    # raise _BadRequestException("Content-Length too long")
+                    self._request.large_body_expected = True
+                    self.request_callback(self._request)
+                    return
+                    
+                if headers.get("Expect") == "100-continue":
+                    self.stream.write(b("HTTP/1.1 100 (Continue)\r\n\r\n"))
+                self.stream.read_bytes(content_length, self._on_request_body)
+                return
 
             self.request_callback(self._request)
         except _BadRequestException, e:
@@ -353,6 +360,13 @@ class HTTPRequest(object):
        be accessed through the "connection" attribute. Since connections
        are typically kept open in HTTP/1.1, multiple requests can be handled
        sequentially on a single connection.
+    
+    .. attribute:: large_body_expected
+    
+       A `bool` that is `True` if the content body cannot be handled in memory.
+       The files attribute will not be automatically populated. To retrieve
+       the contents, a handler should validate the content-length, send a
+       100 Continue code to the browser and then read the data.
     """
     def __init__(self, method, uri, version="HTTP/1.0", headers=None,
                  body=None, remote_ip=None, protocol=None, host=None,
@@ -387,6 +401,7 @@ class HTTPRequest(object):
         self.connection = connection
         self._start_time = time.time()
         self._finish_time = None
+        self.large_body_expected = False
 
         scheme, netloc, path, query, fragment = urlparse.urlsplit(native_str(uri))
         self.path = path
@@ -398,44 +413,6 @@ class HTTPRequest(object):
             if values:
                 self.arguments[name] = values
 
-    def request_continue(self):
-        '''Send a 100-Continue, telling the client to send the request body'''
-        if self.headers.get("Expect") == "100-continue":
-            self.connection.stream.write(b("HTTP/1.1 100 (Continue)\r\n\r\n"))
-
-    def _read_body(self, exec_req_cb):
-        if self.content_length > self.connection.stream.max_buffer_size:
-            raise _BadRequestException("Content-Length too long")
-        
-        self.request_continue()
-        self.connection.stream.read_bytes(self.content_length,
-            lambda data: self._on_request_body(data, exec_req_cb))
-
-    def _on_request_body(self, data, exec_req_cb):
-        self.body = data
-        content_type = self.headers.get("Content-Type", "")
-        if self.method in ("POST", "PUT"):
-            if content_type.startswith("application/x-www-form-urlencoded"):
-                arguments = parse_qs_bytes(native_str(self.body))
-                for name, values in arguments.iteritems():
-                    values = [v for v in values if v]
-                    if values:
-                        self.arguments.setdefault(name, []).extend(
-                            values)
-            elif content_type.startswith("multipart/form-data"):
-                fields = content_type.split(";")
-                for field in fields:
-                    k, sep, v = field.strip().partition("=")
-                    if k == "boundary" and v:
-                        httputil.parse_multipart_form_data(
-                            utf8(v), data,
-                            self.arguments,
-                            self.files)
-                        break
-                else:
-                    logging.warning("Invalid multipart/form-data")
-        exec_req_cb()
-        
     def supports_http_1_1(self):
         """Returns True if this request supports HTTP/1.1 semantics"""
         return self.version == "HTTP/1.1"
