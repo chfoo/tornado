@@ -1691,11 +1691,11 @@ class FileUploadHandlerMixin(object):
     are done.
     
     Use the application setting ``max_streaming_upload_size`` for a global 
-    upload size. The default is 10 GB.
+    upload size. The default is 200 MB.
     """
     
     BUFFER_SIZE = 1048576 # 1 MB
-    DEFAULT_MAX_SIZE = 10737418240 # 10 GB
+    DEFAULT_MAX_SIZE = 209715200 # 200 MB
     
     @property
     def field_storage(self):
