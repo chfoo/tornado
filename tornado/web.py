@@ -1725,13 +1725,12 @@ class FileUploadHandlerMixin(object):
     
     @asynchronous
     def start_reading(self):
-        """Begin receiving the file uploads
-        
-        Raises `IOError` if no large file is expected.
-        """
+        """Begin receiving the file uploads"""
         
         if not self.request.large_body_expected:
-            raise IOError('No large file expected')
+            self._fp = BytesIO(self.request.body)
+            self._create_field_storage()
+            return
         
         max_length = self.settings.get("max_streaming_upload_size", 
             FileUploadHandlerMixin.DEFAULT_MAX_SIZE)
