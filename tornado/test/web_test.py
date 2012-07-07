@@ -72,6 +72,13 @@ class SecureCookieTest(LogTrapTestCase):
         # it gets rejected
         assert handler.get_secure_cookie('foo') is None
 
+    def test_arbitrary_bytes(self):
+        # Secure cookies accept arbitrary data (which is base64 encoded).
+        # Note that normal cookies accept only a subset of ascii.
+        handler = CookieTestRequestHandler()
+        handler.set_secure_cookie('foo', b('\xe9'))
+        self.assertEqual(handler.get_secure_cookie('foo'), b('\xe9'))
+
 
 class CookieTest(AsyncHTTPTestCase, LogTrapTestCase):
     def get_app(self):
@@ -305,6 +312,12 @@ class TypeCheckHandler(RequestHandler):
         self.check_type('argument', self.get_argument('foo'), unicode)
         self.check_type('cookie_key', self.cookies.keys()[0], str)
         self.check_type('cookie_value', self.cookies.values()[0].value, str)
+
+        # Secure cookies return bytes because they can contain arbitrary
+        # data, but regular cookies are native strings.
+        assert self.cookies.keys() == ['asdf']
+        self.check_type('get_secure_cookie', self.get_secure_cookie('asdf'), bytes_type)
+        self.check_type('get_cookie', self.get_cookie('asdf'), str)
 
         self.check_type('xsrf_token', self.xsrf_token, bytes_type)
         self.check_type('xsrf_form_html', self.xsrf_form_html(), str)

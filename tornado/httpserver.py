@@ -39,7 +39,7 @@ from tornado import stack_context
 from tornado.util import b, bytes_type
 
 try:
-    import ssl # Python 2.6+
+    import ssl  # Python 2.6+
 except ImportError:
     ssl = None
 
