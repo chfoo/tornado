@@ -41,7 +41,7 @@ recommended to call::
 
 before closing the `IOLoop`.
 
-This module has been tested with Twisted versions 11.0.0 and 11.1.0.
+This module has been tested with Twisted versions 11.0.0, 11.1.0, and 12.0.0
 """
 
 from __future__ import absolute_import, division, with_statement
@@ -56,7 +56,7 @@ from twisted.internet.interfaces import \
 from twisted.python import failure, log
 from twisted.internet import error
 
-from zope.interface import implements
+from zope.interface import implementer
 
 import tornado
 import tornado.ioloop
@@ -66,8 +66,6 @@ from tornado.ioloop import IOLoop
 
 class TornadoDelayedCall(object):
     """DelayedCall object for Tornado."""
-    implements(IDelayedCall)
-
     def __init__(self, reactor, seconds, f, *args, **kw):
         self._reactor = reactor
         self._func = functools.partial(f, *args, **kw)
@@ -106,6 +104,8 @@ class TornadoDelayedCall(object):
 
     def active(self):
         return self._active
+# Fake class decorator for python 2.5 compatibility
+TornadoDelayedCall = implementer(IDelayedCall)(TornadoDelayedCall)
 
 
 class TornadoReactor(PosixReactorBase):
@@ -118,8 +118,6 @@ class TornadoReactor(PosixReactorBase):
     timed call functionality on top of `IOLoop.add_timeout` rather than
     using the implementation in `PosixReactorBase`.
     """
-    implements(IReactorTime, IReactorFDSet)
-
     def __init__(self, io_loop=None):
         if not io_loop:
             io_loop = tornado.ioloop.IOLoop.instance()
@@ -295,6 +293,7 @@ class TornadoReactor(PosixReactorBase):
         self._io_loop.start()
         if self._stopped:
             self.fireSystemEvent("shutdown")
+TornadoReactor = implementer(IReactorTime, IReactorFDSet)(TornadoReactor)
 
 
 class _TestReactor(TornadoReactor):

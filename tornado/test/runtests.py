@@ -17,12 +17,15 @@ TEST_MODULES = [
     'tornado.test.import_test',
     'tornado.test.ioloop_test',
     'tornado.test.iostream_test',
+    'tornado.test.locale_test',
+    'tornado.test.options_test',
     'tornado.test.process_test',
     'tornado.test.simple_httpclient_test',
     'tornado.test.stack_context_test',
     'tornado.test.template_test',
     'tornado.test.testing_test',
     'tornado.test.twisted_test',
+    'tornado.test.util_test',
     'tornado.test.web_test',
     'tornado.test.wsgi_test',
 ]
@@ -40,8 +43,11 @@ if __name__ == '__main__':
     # ignored by default, including DeprecationWarnings and
     # python 3.2's ResourceWarnings.
     warnings.filterwarnings("error")
-    # Tornado shouldn't use anything deprecated, but some of our
-    # dependencies do (last match wins).
+    # setuptools sometimes gives ImportWarnings about things that are on
+    # sys.path even if they're not being used.
+    warnings.filterwarnings("ignore", category=ImportWarning)
+    # Tornado generally shouldn't use anything deprecated, but some of
+    # our dependencies do (last match wins).
     warnings.filterwarnings("ignore", category=DeprecationWarning)
     warnings.filterwarnings("error", category=DeprecationWarning,
                             module=r"tornado\..*")

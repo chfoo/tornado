@@ -1,16 +1,18 @@
 from __future__ import absolute_import, division, with_statement
 
 import collections
+from contextlib import closing
 import gzip
 import logging
 import re
 import socket
 
+from tornado.httpclient import AsyncHTTPClient
 from tornado.httputil import HTTPHeaders
 from tornado.ioloop import IOLoop
 from tornado.simple_httpclient import SimpleAsyncHTTPClient, _DEFAULT_CA_CERTS
 from tornado.test.httpclient_test import HTTPClientCommonTestCase, ChunkHandler, CountdownHandler, HelloWorldHandler
-from tornado.testing import AsyncHTTPTestCase, LogTrapTestCase
+from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, LogTrapTestCase
 from tornado.util import b
 from tornado.web import RequestHandler, Application, asynchronous, url
 
@@ -57,6 +59,12 @@ class HeadHandler(RequestHandler):
         self.set_header("Content-Length", "7")
 
 
+class OptionsHandler(RequestHandler):
+    def options(self):
+        self.set_header("Access-Control-Allow-Origin", "*")
+        self.write("ok")
+
+
 class NoContentHandler(RequestHandler):
     def get(self):
         if self.get_argument("error", None):
@@ -66,15 +74,18 @@ class NoContentHandler(RequestHandler):
 
 class SeeOther303PostHandler(RequestHandler):
     def post(self):
-        assert self.request.body == b("blah")
+        if self.request.body != b("blah"):
+            raise Exception("unexpected body %r" % self.request.body)
         self.set_header("Location", "/303_get")
         self.set_status(303)
 
 
 class SeeOther303GetHandler(RequestHandler):
     def get(self):
-        assert not self.request.body
+        if self.request.body:
+            raise Exception("unexpected body %r" % self.request.body)
         self.write("ok")
+
 
 class HostEchoHandler(RequestHandler):
     def get(self):
@@ -98,6 +109,7 @@ class SimpleHTTPClientTestCase(AsyncHTTPTestCase, LogTrapTestCase):
             url("/hello", HelloWorldHandler),
             url("/content_length", ContentLengthHandler),
             url("/head", HeadHandler),
+            url("/options", OptionsHandler),
             url("/no_content", NoContentHandler),
             url("/303_post", SeeOther303PostHandler),
             url("/303_get", SeeOther303GetHandler),
@@ -198,7 +210,7 @@ class SimpleHTTPClientTestCase(AsyncHTTPTestCase, LogTrapTestCase):
     def test_request_timeout(self):
         response = self.fetch('/trigger?wake=false', request_timeout=0.1)
         self.assertEqual(response.code, 599)
-        self.assertTrue(0.099 < response.request_time < 0.11, response.request_time)
+        self.assertTrue(0.099 < response.request_time < 0.12, response.request_time)
         self.assertEqual(str(response.error), "HTTP 599: Timeout")
         # trigger the hanging request to let it clean up after itself
         self.triggers.popleft()()
@@ -243,6 +255,13 @@ class SimpleHTTPClientTestCase(AsyncHTTPTestCase, LogTrapTestCase):
         self.assertEqual(response.headers["content-length"], "7")
         self.assertFalse(response.body)
 
+    def test_options_request(self):
+        response = self.fetch("/options", method="OPTIONS")
+        self.assertEqual(response.code, 200)
+        self.assertEqual(response.headers["content-length"], "2")
+        self.assertEqual(response.headers["access-control-allow-origin"], "*")
+        self.assertEqual(response.body, b("ok"))
+
     def test_no_content(self):
         response = self.fetch("/no_content")
         self.assertEqual(response.code, 204)
@@ -263,3 +282,40 @@ class SimpleHTTPClientTestCase(AsyncHTTPTestCase, LogTrapTestCase):
         self.http_client.fetch(url, self.stop)
         response = self.wait()
         self.assertTrue(host_re.match(response.body), response.body)
+
+
+class CreateAsyncHTTPClientTestCase(AsyncTestCase, LogTrapTestCase):
+    def setUp(self):
+        super(CreateAsyncHTTPClientTestCase, self).setUp()
+        self.saved = AsyncHTTPClient._save_configuration()
+
+    def tearDown(self):
+        AsyncHTTPClient._restore_configuration(self.saved)
+        super(CreateAsyncHTTPClientTestCase, self).tearDown()
+
+    def test_max_clients(self):
+        # The max_clients argument is tricky because it was originally
+        # allowed to be passed positionally; newer arguments are keyword-only.
+        AsyncHTTPClient.configure(SimpleAsyncHTTPClient)
+        with closing(AsyncHTTPClient(
+                self.io_loop, force_instance=True)) as client:
+            self.assertEqual(client.max_clients, 10)
+        with closing(AsyncHTTPClient(
+                self.io_loop, 11, force_instance=True)) as client:
+            self.assertEqual(client.max_clients, 11)
+        with closing(AsyncHTTPClient(
+                self.io_loop, max_clients=11, force_instance=True)) as client:
+            self.assertEqual(client.max_clients, 11)
+
+        # Now configure max_clients statically and try overriding it
+        # with each way max_clients can be passed
+        AsyncHTTPClient.configure(SimpleAsyncHTTPClient, max_clients=12)
+        with closing(AsyncHTTPClient(
+                self.io_loop, force_instance=True)) as client:
+            self.assertEqual(client.max_clients, 12)
+        with closing(AsyncHTTPClient(
+                self.io_loop, max_clients=13, force_instance=True)) as client:
+            self.assertEqual(client.max_clients, 13)
+        with closing(AsyncHTTPClient(
+                self.io_loop, max_clients=14, force_instance=True)) as client:
+            self.assertEqual(client.max_clients, 14)

@@ -24,6 +24,11 @@ and static resources.
 This module depends on IOLoop, so it will not work in WSGI applications
 and Google AppEngine.  It also will not work correctly when HTTPServer's
 multi-process mode is used.
+
+Reloading loses any Python interpreter command-line arguments (e.g. ``-u``)
+because it re-executes Python using ``sys.executable`` and ``sys.argv``.
+Additionally, modifying these variables will cause reloading to behave
+incorrectly.
 """
 
 from __future__ import absolute_import, division, with_statement
@@ -280,7 +285,9 @@ def main():
     if mode == 'module':
         # runpy did a fake import of the module as __main__, but now it's
         # no longer in sys.modules.  Figure out where it is and watch it.
-        watch(pkgutil.get_loader(module).get_filename())
+        loader = pkgutil.get_loader(module)
+        if loader is not None:
+            watch(loader.get_filename())
 
     wait()
 
