@@ -1,9 +1,10 @@
 from __future__ import absolute_import, division, with_statement
 
+import os
 import traceback
 
-from tornado.escape import utf8, native_str
-from tornado.template import Template, DictLoader, ParseError
+from tornado.escape import utf8, native_str, to_unicode
+from tornado.template import Template, DictLoader, ParseError, Loader
 from tornado.testing import LogTrapTestCase
 from tornado.util import b, bytes_type, ObjectDict
 
@@ -99,6 +100,16 @@ class TemplateTest(LogTrapTestCase):
         template = Template(utf8("{% if x > 4 %}yes{% else %}no{% end %}"))
         self.assertEqual(template.generate(x=5), b("yes"))
         self.assertEqual(template.generate(x=3), b("no"))
+
+    def test_try(self):
+        template = Template(utf8("""{% try %}
+try{% set y = 1/x %}
+{% except %}-except
+{% else %}-else
+{% finally %}-finally
+{% end %}"""))
+        self.assertEqual(template.generate(x=1), b("\ntry\n-else\n-finally\n"))
+        self.assertEqual(template.generate(x=0), b("\ntry-except\n-finally\n"))
 
     def test_comment_directive(self):
         template = Template(utf8("{% comment blah blah %}foo"))
@@ -310,3 +321,13 @@ raw: {% raw name %}""",
                          b("""s = "';sys.exit()"\n"""))
         self.assertEqual(render("foo.py", ["not a string"]),
                          b("""s = "['not a string']"\n"""))
+
+
+class TemplateLoaderTest(LogTrapTestCase):
+    def setUp(self):
+        self.loader = Loader(os.path.join(os.path.dirname(__file__), "templates"))
+
+    def test_utf8_in_file(self):
+        tmpl = self.loader.load("utf8.html")
+        result = tmpl.generate()
+        self.assertEqual(to_unicode(result).strip(), u"H\u00e9llo")
